@@ -1,95 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <!-- fond -->
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1C1A17" />
-      <stop offset="100%" stop-color="#2F5FA8" />
-    </linearGradient>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Fond violet profond -->
+  <rect width="32" height="32" rx="6" fill="#1a0830"/>
 
-    <!-- glow -->
-    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25" />
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
-    </radialGradient>
+  <!-- Étoiles décoratives -->
+  <circle cx="5" cy="5" r="1" fill="#c9980a" opacity="0.8"/>
+  <circle cx="27" cy="6" r="0.8" fill="#c9980a" opacity="0.6"/>
+  <circle cx="4" cy="26" r="0.7" fill="#c9980a" opacity="0.5"/>
+  <circle cx="28" cy="27" r="1" fill="#c9980a" opacity="0.7"/>
 
-    <!-- ombre -->
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow
-        dx="0"
-        dy="3"
-        stdDeviation="3"
-        flood-color="#000"
-        flood-opacity="0.3"
-      />
-    </filter>
-  </defs>
+  <!-- Chaudron — corps principal -->
+  <ellipse cx="16" cy="22" rx="9" ry="5.5" fill="#2e1050" stroke="#a87c20" stroke-width="1.2"/>
+  <!-- Rebord supérieur du chaudron -->
+  <ellipse cx="16" cy="16.5" rx="8" ry="2.2" fill="#3d1a68" stroke="#a87c20" stroke-width="1.1"/>
+  <!-- Corps du chaudron (trapèze arrondi) -->
+  <path d="M8 16.5 Q7 22 7 23.5 Q7 27 16 27 Q25 27 25 23.5 Q25 22 24 16.5Z" fill="#2e1050" stroke="#a87c20" stroke-width="1.1"/>
 
-  <!-- fond -->
-  <rect
-    x="6"
-    y="6"
-    width="52"
-    height="52"
-    rx="16"
-    fill="url(#bg)"
-    filter="url(#shadow)"
-  />
+  <!-- Anses -->
+  <path d="M8.5 18 Q5 18 5 21 Q5 23 8 23" fill="none" stroke="#a87c20" stroke-width="1.3" stroke-linecap="round"/>
+  <path d="M23.5 18 Q27 18 27 21 Q27 23 24 23" fill="none" stroke="#a87c20" stroke-width="1.3" stroke-linecap="round"/>
 
-  <!-- cercle principal -->
-  <circle
-    cx="32"
-    cy="32"
-    r="18"
-    fill="none"
-    stroke="#ffffff20"
-    stroke-width="6"
-  />
+  <!-- Liquide bouillonnant (ellipse intérieure) -->
+  <ellipse cx="16" cy="16.5" rx="6" ry="1.5" fill="#5b2d8e" opacity="0.85"/>
 
-  <!-- segments (types de congés) -->
-  <circle
-    cx="32"
-    cy="32"
-    r="18"
-    fill="none"
-    stroke="#E05A4D"
-    stroke-width="6"
-    stroke-linecap="round"
-    stroke-dasharray="40 100"
-    transform="rotate(-90 32 32)"
-  />
+  <!-- Bulles de potion -->
+  <circle cx="13" cy="15.5" r="1.1" fill="#9b6fd4" opacity="0.7"/>
+  <circle cx="17" cy="14.8" r="0.8" fill="#c4a0f0" opacity="0.6"/>
+  <circle cx="20" cy="15.8" r="0.9" fill="#9b6fd4" opacity="0.5"/>
 
-  <circle
-    cx="32"
-    cy="32"
-    r="18"
-    fill="none"
-    stroke="#2DA066"
-    stroke-width="6"
-    stroke-linecap="round"
-    stroke-dasharray="25 100"
-    stroke-dashoffset="-45"
-    transform="rotate(-90 32 32)"
-  />
+  <!-- Vapeur / fumée stylisée -->
+  <path d="M13 14 Q12 11 13 9 Q14 7 13 5" fill="none" stroke="#c9980a" stroke-width="0.9" stroke-linecap="round" opacity="0.7"/>
+  <path d="M16 13.5 Q15 10 16 8 Q17 6 16 4" fill="none" stroke="#c9980a" stroke-width="0.9" stroke-linecap="round" opacity="0.9"/>
+  <path d="M19 14 Q20 11 19 9 Q18 7 19 5" fill="none" stroke="#c9980a" stroke-width="0.9" stroke-linecap="round" opacity="0.7"/>
 
-  <circle
-    cx="32"
-    cy="32"
-    r="18"
-    fill="none"
-    stroke="#D4A017"
-    stroke-width="6"
-    stroke-linecap="round"
-    stroke-dasharray="20 100"
-    stroke-dashoffset="-75"
-    transform="rotate(-90 32 32)"
-  />
-
-  <!-- centre -->
-  <circle cx="32" cy="32" r="7" fill="#ffffff" />
-
-  <!-- petit symbole -->
-  <rect x="29" y="29" width="6" height="6" rx="1.5" fill="#2F5FA8" />
-
-  <!-- glow -->
-  <circle cx="32" cy="28" r="20" fill="url(#glow)" />
+  <!-- Étoile magique au-dessus -->
+  <text x="16" y="4" text-anchor="middle" font-size="3" fill="#e8b800" opacity="0.9">✦</text>
 </svg>
