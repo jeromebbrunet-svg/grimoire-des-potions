@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Le Grimoire des Potions</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a0830">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Grimoire">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" sizes="192x192" href="favicon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Uncial+Antiqua&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
 <style>
@@ -631,6 +640,10 @@ textarea{resize:vertical;min-height:72px;line-height:1.5}
 
 <nav id="nav">
   <div class="nav-brand">✦ Grimoire</div>
+  <div id="fb-status" onclick="openAccountModal()" title="Mon compte" style="display:flex;align-items:center;gap:6px;padding:0 10px;cursor:pointer;flex-shrink:0;">
+    <span id="fb-dot" style="width:7px;height:7px;border-radius:50%;background:#c0392b;transition:background 0.4s;flex-shrink:0;"></span>
+    <span id="fb-label" style="font-family:'Crimson Pro',serif;font-size:0.78rem;color:var(--parch3);white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;">Connexion…</span>
+  </div>
   <div class="nav-tabs">
     <button class="nav-tab active" data-page="potions">🧪 Potions <span class="nav-count" id="cnt-potions">0</span></button>
     <button class="nav-tab" data-page="ingredients">🌿 Ingrédients <span class="nav-count" id="cnt-ing">0</span></button>
@@ -902,20 +915,485 @@ textarea{resize:vertical;min-height:72px;line-height:1.5}
 
 <div class="toast" id="toast"></div>
 
-<script>
+<script type="module">
+// ═══════════════════════════════ FIREBASE ════════════════════════════
+
+// ── Imports ──────────────────────────────────────────────────────────
+import { initializeApp }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getDatabase, ref, set, get, onValue }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+import {
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, updatePassword, sendPasswordResetEmail,
+  EmailAuthProvider, reauthenticateWithCredential, updateProfile,
+  browserLocalPersistence, browserSessionPersistence, setPersistence
+} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+
+// ── Config ────────────────────────────────────────────────────────────
+// ⚠️  Remplacez ces valeurs par celles de VOTRE projet Firebase
+const firebaseConfig = {
+  apiKey:            "VOTRE_API_KEY",
+  authDomain:        "VOTRE_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://VOTRE_PROJECT_ID-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "VOTRE_PROJECT_ID",
+  storageBucket:     "VOTRE_PROJECT_ID.firebasestorage.app",
+  messagingSenderId: "VOTRE_SENDER_ID",
+  appId:             "VOTRE_APP_ID"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const fbDb  = getDatabase(fbApp);
+const auth  = getAuth(fbApp);
+
+// ── Chemins ───────────────────────────────────────────────────────────
+const FB_V = 'grimoire_v1';
+let _authUid = null;
+const _fbMyRoot   = ()    => `${FB_V}/${_authUid}`;
+const _fbShared   = (uid) => `${FB_V}_shared/${uid}`;
+const _fbShareIdx = ()    => `${FB_V}_shareidx`;
+const _fbPub      = (uid) => `${FB_V}_pub/${uid}`;
+
+// ── Indicateur réseau ─────────────────────────────────────────────────
+onValue(ref(fbDb, '.info/connected'), snap => {
+  const online = snap.val() === true;
+  const dot = document.getElementById('fb-dot');
+  const lbl = document.getElementById('fb-label');
+  if (dot) dot.style.background = online ? '#1A7A4A' : '#c0392b';
+  if (lbl && _authUid) lbl.textContent = online
+    ? (auth.currentUser?.displayName || 'Connecté') : 'Hors ligne';
+});
+
+// ── Persistance Firebase (remplace persist()) ─────────────────────────
+async function fbPersist() {
+  try { localStorage.setItem(SK, JSON.stringify(DB)); } catch(e) {}
+  if (!_authUid) return;
+  try {
+    const slim = JSON.parse(JSON.stringify(DB));
+    ['potions','ingredients','tools'].forEach(k =>
+      (slim[k]||[]).forEach(it => { if(it.img?.length > 500) it.img = ''; }));
+    await set(ref(fbDb, _fbMyRoot()), slim);
+    await _publishIfShared();
+  } catch(e) { console.warn('Firebase write failed, localStorage used', e); }
+}
+
+async function _publishIfShared() {
+  if (!_authUid) return;
+  try {
+    const snap = await get(ref(fbDb, _fbShared(_authUid)));
+    const data = snap.val();
+    if (!data || !Object.values(data).some(v => v.active)) return;
+    const slim = JSON.parse(JSON.stringify(DB));
+    ['potions','ingredients','tools'].forEach(k =>
+      (slim[k]||[]).forEach(it => { if(it.img?.length > 500) it.img = ''; }));
+    await set(ref(fbDb, _fbPub(_authUid)), slim);
+  } catch(e) {}
+}
+
+// ── Chargement Firebase ───────────────────────────────────────────────
+function _getLocal() {
+  try { return JSON.parse(localStorage.getItem(SK)||'{}'); } catch { return {}; }
+}
+function _mergeImgs(remote, local) {
+  if (!remote?.length) return local || [];
+  const map = {};
+  (local||[]).forEach(it => { if(it.id) map[it.id] = it.img; });
+  return remote.map(it => ({...it, img: map[it.id] || it.img || ''}));
+}
+
+async function fbLoad() {
+  if (!_authUid) return;
+  try {
+    const snap = await get(ref(fbDb, _fbMyRoot()));
+    if (snap.exists()) {
+      const r = snap.val();
+      const l = _getLocal();
+      DB.ingredients = _mergeImgs(r.ingredients, l.ingredients);
+      DB.tools       = _mergeImgs(r.tools,       l.tools);
+      DB.categories  = r.categories?.length ? r.categories : _seedCats();
+      DB.potions     = _mergeImgs(r.potions, l.potions);
+    } else {
+      _initFromLocal();
+      await fbPersist();
+    }
+  } catch(e) {
+    console.warn('Firebase read failed, using localStorage', e);
+    _initFromLocal();
+  }
+  renderAll();
+}
+
+function _initFromLocal() {
+  const s = _getLocal();
+  DB.ingredients = s.ingredients || [];
+  DB.tools       = s.tools       || [];
+  DB.categories  = s.categories  || _seedCats();
+  DB.potions     = s.potions     || [];
+  // Premier lancement : injecter les données de démo
+  if (!DB.potions.length && !DB.ingredients.length) seedData();
+}
+
+// ── Partage ───────────────────────────────────────────────────────────
+async function generateShareCode() {
+  if (!_authUid) return null;
+  const code  = Math.random().toString(36).slice(2,8).toUpperCase();
+  const owner = auth.currentUser?.displayName || auth.currentUser?.email;
+  await set(ref(fbDb, `${_fbShareIdx()}/${code}`),
+    { ownerUid: _authUid, ownerName: owner, used: false, createdAt: Date.now() });
+  return code;
+}
+
+async function redeemShareCode(code) {
+  const cRef = ref(fbDb, `${_fbShareIdx()}/${code.trim().toUpperCase()}`);
+  const snap = await get(cRef);
+  if (!snap.exists())          throw new Error('Code introuvable ou expiré.');
+  const info = snap.val();
+  if (info.used)               throw new Error('Ce code a déjà été utilisé.');
+  if (info.ownerUid===_authUid) throw new Error('Vous ne pouvez pas utiliser votre propre code.');
+  const me = auth.currentUser?.displayName || auth.currentUser?.email;
+  await set(cRef, { ...info, used: true, usedBy: _authUid, usedAt: Date.now() });
+  await set(ref(fbDb, `${_fbShared(info.ownerUid)}/${_authUid}`), { name: me,           active: true });
+  await set(ref(fbDb, `${_fbShared(_authUid)}/${info.ownerUid}`), { name: info.ownerName, active: true });
+}
+
+async function revokeShare(targetUid) {
+  await set(ref(fbDb, `${_fbShared(_authUid)}/${targetUid}/active`), false);
+  await set(ref(fbDb, `${_fbShared(targetUid)}/${_authUid}/active`), false);
+  toast('🔒 Accès révoqué.');
+  _updateSharedUI();
+}
+
+const _sharedGrimoires = {};
+async function loadSharedGrimoires() {
+  if (!_authUid) return;
+  try {
+    const snap = await get(ref(fbDb, _fbShared(_authUid)));
+    const data = snap.val();
+    if (!data) return;
+    for (const [uid, info] of Object.entries(data)) {
+      if (!info.active) continue;
+      onValue(ref(fbDb, _fbPub(uid)), s => {
+        const d = s.val();
+        if (d) { _sharedGrimoires[uid] = { name: info.name, db: d }; _updateSharedUI(); }
+      });
+    }
+    _updateSharedUI();
+  } catch(e) {}
+}
+
+function _updateSharedUI() {
+  const list = document.getElementById('share-active-list');
+  if (!list) return;
+  const entries = Object.entries(_sharedGrimoires);
+  if (!entries.length) {
+    list.innerHTML = '<div style="font-size:0.82rem;color:var(--parch4);font-style:italic;">Aucun partage actif.</div>';
+    return;
+  }
+  list.innerHTML = entries.map(([uid, info]) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;
+      padding:8px 12px;background:rgba(91,45,142,.1);border:1px solid var(--gold);
+      border-radius:6px;font-size:0.85rem;color:var(--ink);font-family:'Crimson Pro',serif;">
+      <span>🧙 ${esc(info.name)} <em style="color:var(--parch4);font-size:0.75rem;">(lecture seule)</em></span>
+      <button onclick="revokeShare('${uid}')" style="background:none;border:none;cursor:pointer;
+        color:var(--ruby);font-size:0.78rem;font-family:'Crimson Pro',serif;text-decoration:underline;">
+        Révoquer</button>
+    </div>`).join('');
+}
+
+// ── Modal Partage ─────────────────────────────────────────────────────
+function openShareModal() {
+  let m = document.getElementById('modal-share');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'modal-share';
+    const IS = `border:1px solid var(--gold);border-radius:6px;padding:9px 12px;font-size:0.85rem;background:var(--parch);color:var(--ink);outline:none;font-family:'Crimson Pro',serif;width:100%;box-sizing:border-box;`;
+    const BS = `background:var(--deep2);color:var(--gold2);border:1px solid var(--gold);border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'Crimson Pro',serif;`;
+    m.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(10,5,20,.75);z-index:99999;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)closeShareModal()">
+        <div style="background:var(--parch);border:2px solid var(--gold);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.5);width:440px;max-width:calc(100vw - 32px);padding:28px;max-height:90vh;overflow-y:auto;">
+          <div style="font-family:'Cinzel Decorative',cursive;font-size:1.1rem;color:var(--deep2);margin-bottom:4px;">✦ Partage du Grimoire</div>
+          <div style="font-size:0.8rem;color:var(--amber2);font-style:italic;margin-bottom:20px;">Partagez vos recettes en lecture seule via un code magique.</div>
+          <div style="background:var(--parch2);border:1px solid var(--gold);border-radius:6px;padding:14px;margin-bottom:14px;">
+            <div style="font-family:'Cinzel Decorative',cursive;font-size:0.64rem;color:var(--deep2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Inviter un sorcier</div>
+            <div id="share-code-display" style="font-size:1.8rem;font-weight:700;letter-spacing:5px;color:var(--mid);text-align:center;padding:10px;display:none;background:rgba(91,45,142,.1);border:1px solid var(--mid);border-radius:6px;margin-bottom:8px;font-family:'Cinzel Decorative',cursive;"></div>
+            <div id="share-code-hint" style="font-size:0.75rem;color:var(--amber2);text-align:center;margin-bottom:10px;display:none;font-style:italic;">✦ Code à usage unique — transmettez-le à votre apprenti</div>
+            <button onclick="doGenCode()" style="${BS}width:100%;">🔮 Générer un code d'invitation</button>
+          </div>
+          <div style="background:var(--parch2);border:1px solid var(--gold);border-radius:6px;padding:14px;margin-bottom:14px;">
+            <div style="font-family:'Cinzel Decorative',cursive;font-size:0.64rem;color:var(--deep2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Rejoindre un sorcier</div>
+            <div style="display:flex;gap:8px;">
+              <input id="share-code-input" type="text" placeholder="Code (ex : AB12CD)" style="${IS}flex:1;width:auto;text-transform:uppercase;letter-spacing:3px;">
+              <button onclick="doRedeemCode()" style="${BS}white-space:nowrap;">Rejoindre</button>
+            </div>
+            <div id="share-redeem-msg" style="font-size:0.8rem;margin-top:8px;font-style:italic;display:none;"></div>
+          </div>
+          <div>
+            <div style="font-family:'Cinzel Decorative',cursive;font-size:0.64rem;color:var(--deep2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Grimoires partagés</div>
+            <div id="share-active-list"><div style="font-size:0.82rem;color:var(--parch4);font-style:italic;">Chargement…</div></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:20px;padding-top:14px;border-top:1px solid var(--gold);">
+            <button onclick="closeShareModal()" style="background:var(--parch);border:1px solid var(--gold);border-radius:6px;padding:8px 18px;font-size:0.82rem;cursor:pointer;color:var(--deep2);font-family:'Crimson Pro',serif;">Fermer</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+  }
+  document.getElementById('share-code-display').style.display = 'none';
+  document.getElementById('share-code-hint').style.display    = 'none';
+  document.getElementById('share-code-input').value           = '';
+  document.getElementById('share-redeem-msg').style.display   = 'none';
+  m.style.display = 'flex';
+  _updateSharedUI();
+}
+function closeShareModal() {
+  const m = document.getElementById('modal-share');
+  if (m) m.style.display = 'none';
+}
+async function doGenCode() {
+  const code = await generateShareCode();
+  if (!code) return;
+  const d = document.getElementById('share-code-display');
+  const h = document.getElementById('share-code-hint');
+  d.textContent = code; d.style.display = 'block'; h.style.display = 'block';
+  try { navigator.clipboard.writeText(code); toast('✦ Code copié dans le presse-papier !'); } catch(e) {}
+}
+async function doRedeemCode() {
+  const code = document.getElementById('share-code-input')?.value.trim().toUpperCase();
+  const msg  = document.getElementById('share-redeem-msg');
+  if (!code) return;
+  msg.style.display = 'block'; msg.style.color = 'var(--amber2)'; msg.textContent = '⏳ Vérification…';
+  try {
+    await redeemShareCode(code);
+    msg.textContent = '✓ Accès établi ! Le grimoire de votre collègue est maintenant visible.';
+    msg.style.color = 'var(--teal)';
+    document.getElementById('share-code-input').value = '';
+    await loadSharedGrimoires();
+  } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color = 'var(--ruby)'; }
+}
+
+// ── Écran de connexion ────────────────────────────────────────────────
+function showAuthScreen() {
+  if (document.getElementById('auth-screen')) return;
+  const el = document.createElement('div');
+  el.id = 'auth-screen';
+  const IS = `border:1px solid var(--gold);border-radius:6px;padding:10px 12px;font-size:0.9rem;background:var(--parch);color:var(--ink);outline:none;font-family:'Crimson Pro',serif;width:100%;box-sizing:border-box;`;
+  const BS = `background:var(--deep2);color:var(--gold2);border:1px solid var(--gold);border-radius:6px;padding:11px;font-size:0.9rem;font-weight:600;cursor:pointer;font-family:'Cinzel Decorative',cursive;width:100%;`;
+  el.innerHTML = `
+    <div style="position:fixed;inset:0;background:#0c0718;z-index:99999;display:flex;align-items:center;justify-content:center;font-family:'Crimson Pro',serif;">
+      <div id="auth-stars" style="position:absolute;inset:0;overflow:hidden;pointer-events:none;"></div>
+      <div style="background:var(--parch);border:2px solid var(--gold);border-radius:4px;box-shadow:0 8px 60px rgba(0,0,0,.7),inset 0 0 40px rgba(168,124,32,.06);padding:36px 32px 28px;width:380px;max-width:calc(100vw - 32px);position:relative;z-index:1;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <div style="font-size:2.5rem;margin-bottom:8px;">🧪</div>
+          <div style="font-family:'Cinzel Decorative',cursive;font-size:1.2rem;color:var(--deep2);margin-bottom:4px;">Le Grimoire</div>
+          <div style="font-family:'IM Fell English',serif;font-size:0.85rem;color:var(--amber2);font-style:italic;">des Potions Magiques</div>
+        </div>
+        <div style="display:flex;margin-bottom:20px;border-bottom:2px solid var(--gold);">
+          <button id="atab-login" onclick="authTab('login')" style="flex:1;padding:9px;font-size:0.82rem;font-family:'Cinzel Decorative',cursive;border:none;background:none;cursor:pointer;color:var(--deep2);border-bottom:2px solid var(--deep2);margin-bottom:-2px;">Connexion</button>
+          <button id="atab-signup" onclick="authTab('signup')" style="flex:1;padding:9px;font-size:0.82rem;font-family:'Cinzel Decorative',cursive;border:none;background:none;cursor:pointer;color:var(--parch4);border-bottom:2px solid transparent;margin-bottom:-2px;">Nouveau Sorcier</button>
+        </div>
+        <div id="aform-login">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <input id="ain-email" type="email" placeholder="Votre email" style="${IS}">
+            <input id="ain-pass"  type="password" placeholder="Mot de passe" style="${IS}">
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--amber2);cursor:pointer;font-style:italic;">
+              <input type="checkbox" id="ain-remember" checked style="accent-color:var(--mid);"> Rester connecté</label>
+            <div id="aerr-login" style="font-size:0.8rem;color:var(--ruby);display:none;font-style:italic;"></div>
+            <button onclick="doLogin()" style="${BS}">✦ Entrer dans le Grimoire</button>
+            <button onclick="doForgot()" style="background:none;border:none;font-size:0.78rem;color:var(--parch4);cursor:pointer;text-decoration:underline;padding:0;text-align:center;font-family:'Crimson Pro',serif;font-style:italic;">Mot de passe oublié ?</button>
+          </div>
+        </div>
+        <div id="aform-signup" style="display:none;">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <input id="ain-sname"  type="text"     placeholder="Votre nom de sorcier" style="${IS}">
+            <input id="ain-semail" type="email"    placeholder="Votre email" style="${IS}">
+            <input id="ain-spass"  type="password" placeholder="Mot de passe (6 car. min.)" style="${IS}">
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--amber2);cursor:pointer;font-style:italic;">
+              <input type="checkbox" id="ain-sremember" checked style="accent-color:var(--mid);"> Rester connecté</label>
+            <div id="aerr-signup" style="font-size:0.8rem;color:var(--ruby);display:none;font-style:italic;"></div>
+            <button onclick="doSignup()" style="${BS}">🔮 Créer mon Grimoire</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  const sc = document.getElementById('auth-stars');
+  for (let i = 0; i < 60; i++) {
+    const s = document.createElement('div');
+    s.style.cssText = `position:absolute;width:${Math.random()*2+1}px;height:${Math.random()*2+1}px;border-radius:50%;background:#c9980a;top:${Math.random()*100}%;left:${Math.random()*100}%;opacity:${Math.random()*.6+.1};animation:tw ${(Math.random()*3+2).toFixed(1)}s ${(Math.random()*4).toFixed(1)}s infinite alternate;`;
+    sc.appendChild(s);
+  }
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    document.getElementById('aform-login').style.display !== 'none' ? doLogin() : doSignup();
+  });
+}
+function removeAuthScreen() {
+  const el = document.getElementById('auth-screen');
+  if (el) el.remove();
+}
+function authTab(tab) {
+  document.getElementById('aform-login').style.display  = tab==='login'  ? 'block' : 'none';
+  document.getElementById('aform-signup').style.display = tab==='signup' ? 'block' : 'none';
+  document.getElementById('atab-login').style.cssText   += `;color:${tab==='login'  ?'var(--deep2)':'var(--parch4)'};border-bottom-color:${tab==='login'  ?'var(--deep2)':'transparent'}`;
+  document.getElementById('atab-signup').style.cssText  += `;color:${tab==='signup' ?'var(--deep2)':'var(--parch4)'};border-bottom-color:${tab==='signup' ?'var(--deep2)':'transparent'}`;
+}
+function _authErr(code) {
+  return ({
+    'auth/invalid-email':        'Email invalide.',
+    'auth/user-not-found':       'Aucun grimoire trouvé pour cet email.',
+    'auth/wrong-password':       'Mot de passe incorrect.',
+    'auth/invalid-credential':   'Email ou mot de passe incorrect.',
+    'auth/email-already-in-use': 'Un grimoire existe déjà avec cet email.',
+    'auth/weak-password':        'Mot de passe trop court (6 car. min.).',
+    'auth/too-many-requests':    'Trop de tentatives. Réessayez plus tard.',
+  })[code] || ('Erreur : ' + code);
+}
+async function _setPersist(remember) {
+  await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+}
+async function doLogin() {
+  const email = document.getElementById('ain-email')?.value.trim();
+  const pass  = document.getElementById('ain-pass')?.value;
+  const rem   = document.getElementById('ain-remember')?.checked;
+  const err   = document.getElementById('aerr-login');
+  if (!email||!pass) { err.textContent='Remplissez tous les champs.'; err.style.display='block'; return; }
+  err.style.display = 'none';
+  try { await _setPersist(rem); await signInWithEmailAndPassword(auth, email, pass); }
+  catch(e) { err.textContent = _authErr(e.code); err.style.display='block'; }
+}
+async function doSignup() {
+  const name  = document.getElementById('ain-sname')?.value.trim();
+  const email = document.getElementById('ain-semail')?.value.trim();
+  const pass  = document.getElementById('ain-spass')?.value;
+  const rem   = document.getElementById('ain-sremember')?.checked;
+  const err   = document.getElementById('aerr-signup');
+  if (!name||!email||!pass) { err.textContent='Remplissez tous les champs.'; err.style.display='block'; return; }
+  err.style.display = 'none';
+  try {
+    await _setPersist(rem);
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    await updateProfile(cred.user, { displayName: name });
+  } catch(e) { err.textContent = _authErr(e.code); err.style.display='block'; }
+}
+async function doForgot() {
+  const email = document.getElementById('ain-email')?.value.trim();
+  const err   = document.getElementById('aerr-login');
+  if (!email) { err.textContent="Saisissez votre email d'abord."; err.style.display='block'; return; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    err.style.color='var(--teal)'; err.textContent='✓ Email de réinitialisation envoyé.'; err.style.display='block';
+  } catch(e) { err.textContent=_authErr(e.code); err.style.display='block'; }
+}
+
+// ── Modal Mon Compte ──────────────────────────────────────────────────
+function openAccountModal() {
+  if (!_authUid) { showAuthScreen(); return; }
+  let m = document.getElementById('modal-account');
+  if (m) { m.style.display='flex'; return; }
+  m = document.createElement('div'); m.id = 'modal-account';
+  const IS = `border:1px solid var(--gold);border-radius:6px;padding:9px 12px;font-size:0.85rem;background:var(--parch);color:var(--ink);outline:none;font-family:'Crimson Pro',serif;width:100%;box-sizing:border-box;`;
+  const BS = `background:var(--deep2);color:var(--gold2);border:1px solid var(--gold);border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'Crimson Pro',serif;`;
+  const displayName = auth.currentUser?.displayName || '';
+  const email       = auth.currentUser?.email || '';
+  m.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(10,5,20,.75);z-index:99999;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)closeAccountModal()">
+      <div style="background:var(--parch);border:2px solid var(--gold);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.5);width:400px;max-width:calc(100vw - 32px);padding:28px;">
+        <div style="font-family:'Cinzel Decorative',cursive;font-size:1rem;color:var(--deep2);margin-bottom:14px;">🧙 Mon Compte</div>
+        <div style="font-size:0.85rem;color:var(--amber2);font-style:italic;margin-bottom:16px;">
+          Connecté en tant que <strong>${esc(displayName)}</strong><br>
+          <span style="font-size:0.78rem;color:var(--parch4);">${esc(email)}</span></div>
+        <div style="margin-bottom:12px;">
+          <label style="font-family:'Cinzel Decorative',cursive;font-size:0.64rem;color:var(--deep2);display:block;margin-bottom:6px;">Nom de sorcier</label>
+          <div style="display:flex;gap:8px;">
+            <input id="acc-name" type="text" value="${esc(displayName)}" style="${IS}flex:1;width:auto;">
+            <button onclick="doUpdateName()" style="${BS}">Modifier</button>
+          </div>
+          <div id="acc-name-msg" style="font-size:0.78rem;margin-top:4px;font-style:italic;display:none;"></div>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="font-family:'Cinzel Decorative',cursive;font-size:0.64rem;color:var(--deep2);display:block;margin-bottom:6px;">Changer le mot de passe</label>
+          <input id="acc-pass-old" type="password" placeholder="Mot de passe actuel" style="${IS}margin-bottom:6px;">
+          <input id="acc-pass-new" type="password" placeholder="Nouveau mot de passe" style="${IS}margin-bottom:6px;">
+          <button onclick="doUpdatePass()" style="${BS}width:100%;">Changer le mot de passe</button>
+          <div id="acc-pass-msg" style="font-size:0.78rem;margin-top:4px;font-style:italic;display:none;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--gold);">
+          <button onclick="openShareModal();closeAccountModal();" style="background:rgba(91,45,142,.15);border:1px solid var(--mid);border-radius:6px;padding:8px 14px;font-size:0.82rem;cursor:pointer;color:var(--mid);font-family:'Crimson Pro',serif;">
+            🔮 Partager mon grimoire</button>
+          <div style="display:flex;gap:8px;">
+            <button onclick="doSignOut()" style="background:none;border:1px solid var(--ruby);border-radius:6px;padding:8px 14px;font-size:0.82rem;cursor:pointer;color:var(--ruby);font-family:'Crimson Pro',serif;">Déconnexion</button>
+            <button onclick="closeAccountModal()" style="background:var(--parch);border:1px solid var(--gold);border-radius:6px;padding:8px 14px;font-size:0.82rem;cursor:pointer;color:var(--deep2);font-family:'Crimson Pro',serif;">Fermer</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  m.style.display = 'flex';
+}
+function closeAccountModal() {
+  const m = document.getElementById('modal-account');
+  if (m) m.style.display = 'none';
+}
+async function doUpdateName() {
+  const name = document.getElementById('acc-name')?.value.trim();
+  const msg  = document.getElementById('acc-name-msg');
+  if (!name) return;
+  try {
+    await updateProfile(auth.currentUser, { displayName: name });
+    msg.textContent='✓ Nom mis à jour.'; msg.style.color='var(--teal)'; msg.style.display='block';
+    const lbl = document.getElementById('fb-label'); if(lbl) lbl.textContent = name;
+    setTimeout(()=>{ msg.style.display='none'; }, 2000);
+  } catch(e) { msg.textContent=_authErr(e.code); msg.style.color='var(--ruby)'; msg.style.display='block'; }
+}
+async function doUpdatePass() {
+  const oldP = document.getElementById('acc-pass-old')?.value;
+  const newP = document.getElementById('acc-pass-new')?.value;
+  const msg  = document.getElementById('acc-pass-msg');
+  if (!oldP||!newP) { msg.textContent='Remplissez les deux champs.'; msg.style.color='var(--ruby)'; msg.style.display='block'; return; }
+  try {
+    const cred = EmailAuthProvider.credential(auth.currentUser.email, oldP);
+    await reauthenticateWithCredential(auth.currentUser, cred);
+    await updatePassword(auth.currentUser, newP);
+    msg.textContent='✓ Mot de passe modifié.'; msg.style.color='var(--teal)'; msg.style.display='block';
+    document.getElementById('acc-pass-old').value = '';
+    document.getElementById('acc-pass-new').value = '';
+    setTimeout(()=>{ msg.style.display='none'; }, 2000);
+  } catch(e) { msg.textContent=_authErr(e.code); msg.style.color='var(--ruby)'; msg.style.display='block'; }
+}
+async function doSignOut() {
+  _authUid = null;
+  await signOut(auth);
+  closeAccountModal(); closeShareModal();
+  DB = { ingredients:[], tools:[], categories:_seedCats(), potions:[] };
+  renderAll();
+}
+
+// ── onAuthStateChanged — point d'entrée ───────────────────────────────
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    _authUid = user.uid;
+    removeAuthScreen();
+    const name = user.displayName || user.email?.split('@')[0] || 'Sorcier';
+    const lbl  = document.getElementById('fb-label');
+    if (lbl) lbl.textContent = name;
+    await fbLoad();
+    await loadSharedGrimoires();
+  } else {
+    _authUid = null;
+    DB = { ingredients:[], tools:[], categories:_seedCats(), potions:[] };
+    showAuthScreen();
+    const lbl = document.getElementById('fb-label');
+    if (lbl) lbl.textContent = 'Connexion…';
+  }
+});
+
 // ═══════════════════════════════ DATA ════════════════════════════════
 const SK = 'grimoire_v3';
 function load(){try{return JSON.parse(localStorage.getItem(SK)||'{}')}catch{return{}}}
 
-let DB = load();
-if(!DB.ingredients) DB.ingredients=[];
-if(!DB.tools) DB.tools=[];
-if(!DB.categories) DB.categories=[];
-if(!DB.potions) DB.potions=[];
-
-// ─ seed defaults ─
-if(!DB.categories.length){
-  DB.categories=[
+// ─ _seedCats / seedData : données de démo (utilisées par fbLoad au 1er lancement) ─
+function _seedCats() {
+  return [
     {id:'cat1',name:'Potion de Soin',emoji:'💚',color:'#0b6e60',desc:'Guérison, régénération, protection'},
     {id:'cat2',name:'Potion de Magie',emoji:'💜',color:'#5b2d8e',desc:'Amplification des pouvoirs, sorts et enchantements'},
     {id:'cat3',name:"Potion d'Aventure",emoji:'❤️',color:'#7a0e1e',desc:'Courage, force, endurance'},
@@ -923,25 +1401,25 @@ if(!DB.categories.length){
     {id:'cat5',name:'Potion Mystérieuse',emoji:'🩵',color:'#1a4a7a',desc:'Effets inconnus, secrets et surprises'},
   ];
 }
-if(!DB.ingredients.length){
-  DB.ingredients=[
-    {id:'i1',name:'Herbe de Lune',origin:'Prairie Enchantée',desc:'Plante argentée qui pousse sous la pleine lune. Ses feuilles brillent dans l\'obscurité et sentent la vanille et la rosée.',img:''},
-    {id:'i2',name:'Poussière d\'Étoile',origin:'Cosmos',desc:'Paillettes scintillantes récoltées au solstice d\'été. Amplifie tous les sorts de lumière.',img:''},
+function seedData() {
+  DB.categories = _seedCats();
+  DB.ingredients = [
+    {id:'i1',name:'Herbe de Lune',origin:'Prairie Enchantée',desc:"Plante argentée qui pousse sous la pleine lune. Ses feuilles brillent dans l'obscurité et sentent la vanille et la rosée.",img:''},
+    {id:'i2',name:"Poussière d'Étoile",origin:'Cosmos',desc:"Paillettes scintillantes récoltées au solstice d'été. Amplifie tous les sorts de lumière.",img:''},
     {id:'i3',name:'Eau de Source Magique',origin:'Montagne des Fées',desc:'Eau cristalline chargée en magie naturelle. Base de la majorité des élixirs.',img:''},
     {id:'i4',name:'Miel Enchanté',origin:'Ruche des Fées',desc:'Miel doré aux vertus thérapeutiques puissantes. Sucré et légèrement pétillant.',img:''},
     {id:'i5',name:'Pétales de Rose Noire',origin:'Jardin des Ombres',desc:'Pétales sombres au parfum envoûtant. Entrent dans la composition des potions de mystère.',img:''},
   ];
-}
-if(!DB.tools.length){
-  DB.tools=[
-    {id:'t1',name:'Chaudron de Cuivre',cat:'chauffage',desc:'Chaudron traditionnel idéal pour les mélanges à chaud. Toujours remuer dans le sens des aiguilles d\'une montre.',units:['litres','ml'],img:''},
+  DB.tools = [
+    {id:'t1',name:'Chaudron de Cuivre',cat:'chauffage',desc:"Chaudron traditionnel idéal pour les mélanges à chaud. Toujours remuer dans le sens des aiguilles d'une montre.",units:['litres','ml'],img:''},
     {id:'t2',name:'Mortier & Pilon de Pierre',cat:'preparation',desc:'Pour broyer herbes, cristaux et épices magiques. La pierre noire absorbe les résidus de magie.',units:['pincées','g'],img:''},
-    {id:'t3',name:'Fiole en Cristal',cat:'contenant',desc:'Contenant de stockage pour potions finies. Le cristal conserve la magie jusqu\'à 3 lunes.',units:['ml','doses','gouttes'],img:''},
+    {id:'t3',name:'Fiole en Cristal',cat:'contenant',desc:"Contenant de stockage pour potions finies. Le cristal conserve la magie jusqu'à 3 lunes.",units:['ml','doses','gouttes'],img:''},
     {id:'t4',name:'Baguette de Mélange',cat:'preparation',desc:'Baguette en bois de sorbier pour mélanger sans altérer les propriétés magiques.',units:[],img:''},
-    {id:'t5',name:'Filtre de Soie d\'Araignée',cat:'filtration',desc:'Filtre extraordinairement fin pour obtenir des potions pures. Usage unique.',units:[],img:''},
+    {id:'t5',name:"Filtre de Soie d'Araignée",cat:'filtration',desc:'Filtre extraordinairement fin pour obtenir des potions pures. Usage unique.',units:[],img:''},
   ];
 }
-persist();
+
+let DB = { ingredients:[], tools:[], categories:[], potions:[] };
 
 // ═══════════════════════════════ STARS ═══════════════════════════════
 (function(){
@@ -1012,24 +1490,6 @@ function resetPreview(previewId,inputId){
   const p=document.getElementById(previewId);
   if(p){p.src='';p.style.display='none';p.dataset.hasImg='0'}
   if(inputId){const i=document.getElementById(inputId);if(i)i.value=''}
-}
-function persist(){
-  try{
-    localStorage.setItem(SK,JSON.stringify(DB));
-  }catch(e){
-    // localStorage quota exceeded — try saving without images
-    console.warn('Storage full, retrying without images');
-    try{
-      const slim=JSON.parse(JSON.stringify(DB));
-      ['potions','ingredients','tools'].forEach(k=>{
-        (slim[k]||[]).forEach(item=>{if(item.img&&item.img.length>500)item.img=''});
-      });
-      localStorage.setItem(SK,JSON.stringify(slim));
-      toast('⚠️ Images non sauvegardées (stockage plein)');
-    }catch(e2){
-      toast('⚠️ Impossible de sauvegarder — stockage saturé');
-    }
-  }
 }
 
 const DIFF_LEVELS=[
@@ -1110,14 +1570,14 @@ function saveIng(){
   };
   if(editIngId){const i=DB.ingredients.findIndex(x=>x.id===editIngId);if(i>=0)DB.ingredients[i]=obj}
   else DB.ingredients.unshift(obj);
-  persist();closeModal('ov-ing');renderIngredients();updateCounts();
+  fbPersist();closeModal('ov-ing');renderIngredients();updateCounts();
   toast(editIngId?'✦ Ingrédient modifié !':'🌿 Ingrédient ajouté à la bibliothèque !');
 }
 
 function deleteIng(id){
   if(!confirm('Supprimer cet ingrédient ?'))return;
   DB.ingredients=DB.ingredients.filter(x=>x.id!==id);
-  persist();renderIngredients();updateCounts();toast('🗑 Ingrédient supprimé.');
+  fbPersist();renderIngredients();updateCounts();toast('🗑 Ingrédient supprimé.');
 }
 
 // ═══════════════════════════════ TOOLS ════════════════════════════════
@@ -1195,14 +1655,14 @@ function saveTool(){
   };
   if(editToolId){const i=DB.tools.findIndex(x=>x.id===editToolId);if(i>=0)DB.tools[i]=obj}
   else DB.tools.unshift(obj);
-  persist();closeModal('ov-tool');renderTools();updateCounts();
+  fbPersist();closeModal('ov-tool');renderTools();updateCounts();
   toast(editToolId?'✦ Ustensile modifié !':'⚗️ Ustensile ajouté !');
 }
 
 function deleteTool(id){
   if(!confirm('Supprimer cet ustensile ?'))return;
   DB.tools=DB.tools.filter(x=>x.id!==id);
-  persist();renderTools();updateCounts();toast('🗑 Ustensile supprimé.');
+  fbPersist();renderTools();updateCounts();toast('🗑 Ustensile supprimé.');
 }
 
 // ═══════════════════════════════ CATEGORIES ═══════════════════════════
@@ -1267,7 +1727,7 @@ function saveCat(){
   };
   if(editCatId){const i=DB.categories.findIndex(x=>x.id===editCatId);if(i>=0)DB.categories[i]=obj}
   else DB.categories.push(obj);
-  persist();closeModal('ov-cat');renderCategories();updateCounts();
+  fbPersist();closeModal('ov-cat');renderCategories();updateCounts();
   toast(editCatId?'✦ Catégorie modifiée !':'🏷️ Catégorie créée !');
 }
 
@@ -1276,7 +1736,7 @@ function deleteCat(id){
   if(used&&!confirm('Cette catégorie est utilisée par des potions. Supprimer quand même ?'))return;
   if(!used&&!confirm('Supprimer cette catégorie ?'))return;
   DB.categories=DB.categories.filter(x=>x.id!==id);
-  persist();renderCategories();updateCounts();renderPotions();toast('🗑 Catégorie supprimée.');
+  fbPersist();renderCategories();updateCounts();renderPotions();toast('🗑 Catégorie supprimée.');
 }
 
 // ═══════════════════════════════ POTIONS ══════════════════════════════
@@ -1538,14 +1998,14 @@ function savePotion(){
   };
   if(editPotionId){const i=DB.potions.findIndex(x=>x.id===editPotionId);if(i>=0)DB.potions[i]=obj}
   else DB.potions.unshift(obj);
-  persist();closeModal('ov-potion-form');renderPotions();updateCounts();
+  fbPersist();closeModal('ov-potion-form');renderPotions();updateCounts();
   toast(editPotionId?'✦ Recette mise à jour !':'✨ Potion inscrite dans le Grimoire !');
 }
 
 function deletePotion(id){
   if(!confirm('Supprimer cette potion du grimoire ?'))return;
   DB.potions=DB.potions.filter(x=>x.id!==id);
-  persist();closeModal('ov-potion-view');renderPotions();updateCounts();toast('🗑 Potion supprimée.');
+  fbPersist();closeModal('ov-potion-view');renderPotions();updateCounts();toast('🗑 Potion supprimée.');
 }
 
 // ─ view potion ─
@@ -1610,34 +2070,35 @@ function renderAll(){
   renderIngredients();renderTools();renderCategories();renderPotions();updateCounts();
 }
 
-// seed sample potions
-if(!DB.potions.length&&DB.categories.length&&DB.ingredients.length){
-  DB.potions=[
-    {
-      id:'p1',name:'Élixir des Étoiles Filantes',catId:'cat2',diff:3,
-      time:'30 minutes',qty:'1 fiole',
-      desc:'Une potion scintillante qui permet à celui qui la boit d\'entendre les murmures des constellations.',
-      effects:'Yeux argentés pendant 1 heure. Vision dans l\'obscurité.',img:'',
-      ingredients:[{ingId:'i1',qty:'3',unit:'pincée'},{ingId:'i2',qty:'100',unit:'ml'},{ingId:'i4',qty:'1',unit:'cuillère'}],
-      tools:[{toolId:'t1',note:'Feu doux uniquement'},{toolId:'t3',note:''}],
-      steps:['Verser l\'eau de source dans le chaudron et porter à frémissement.','Ajouter l\'herbe de lune en remuant 7 fois dans le sens des aiguilles d\'une montre.','Saupoudrer la poussière d\'étoile en prononçant "Luminos".','Laisser refroidir 10 minutes avant d\'ajouter le miel.','Verser dans la fiole et agiter jusqu\'à voir des reflets argentés.'],
-      notes:'Préparer par nuit de pleine lune pour décupler les effets.',
-    },
-    {
-      id:'p2',name:'Potion du Courage Cramoisi',catId:'cat3',diff:1,
-      time:'15 minutes',qty:'2 doses',
-      desc:'Un breuvage rouge vif qui réchauffe le cœur et chasse toutes les peurs.',
-      effects:'Chaleur dans la poitrine. Disparition de la peur pendant 2 heures.',img:'',
-      ingredients:[{ingId:'i3',qty:'150',unit:'ml'},{ingId:'i5',qty:'5',unit:'pincée'}],
-      tools:[{toolId:'t1',note:''},{toolId:'t5',note:'Filtrer 2 fois'}],
-      steps:['Mélanger l\'eau de source et les pétales dans le chaudron.','Chauffer doucement 10 minutes sans faire bouillir.','Filtrer et verser dans la fiole.'],
-      notes:'',
-    }
-  ];
-  persist();
-}
 
-renderAll();
+// Note : le seed des potions est géré par seedData() appelée lors du premier chargement Firebase.
+// Le démarrage de l'application est géré par onAuthStateChanged ci-dessus.
+
+// ── Exposition globale (type="module" requiert window.*) ──────────────────────
+Object.assign(window, {
+  // Navigation & UI
+  openModal, closeModal, toast,
+  // Auth
+  authTab, doLogin, doSignup, doForgot, doSignOut,
+  // Compte
+  openAccountModal, closeAccountModal, doUpdateName, doUpdatePass,
+  // Partage
+  openShareModal, closeShareModal, doGenCode, doRedeemCode, revokeShare,
+  // Potions
+  openPotionForm, editPotion, savePotion, deletePotion, viewPotion,
+  setDiff, addIngPicker, removeIngPicker, addToolPicker, removeToolPicker,
+  addStep, removeStep,
+  // Ingrédients
+  openIngForm, editIng, saveIng, deleteIng,
+  // Ustensiles
+  openToolForm, editTool, saveTool, deleteTool, addUnit, removeUnit,
+  // Catégories
+  openCatForm, editCat, saveCat, deleteCat, pickEmoji,
+  // Images
+  previewImg,
+  // Persistance
+  fbPersist,
+});
 </script>
 </body>
 </html>
