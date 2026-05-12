@@ -1938,12 +1938,18 @@
       // ⚠️  Remplacez ces valeurs par celles de VOTRE projet Firebase
       const firebaseConfig = {
         apiKey: "AIzaSyBH5gEeU-OXmnROhNGKrqE6Fc8z2WGAOtk",
+
         authDomain: "grimoire-des-potions.firebaseapp.com",
+
         databaseURL:
           "https://grimoire-des-potions-default-rtdb.europe-west1.firebasedatabase.app",
+
         projectId: "grimoire-des-potions",
+
         storageBucket: "grimoire-des-potions.firebasestorage.app",
+
         messagingSenderId: "205264079204",
+
         appId: "1:205264079204:web:dc4d63edcf840401a65271",
       };
 
@@ -2510,6 +2516,66 @@
         };
         renderAll();
       }
+
+      // ── Exposition globale (type="module" requiert window.*) ──────────────────────
+      // DOIT être avant onAuthStateChanged pour que les onclick de l'écran de connexion fonctionnent
+      Object.assign(window, {
+        // Navigation & UI
+        openModal,
+        closeModal,
+        toast,
+        // Auth
+        authTab,
+        doLogin,
+        doSignup,
+        doForgot,
+        doSignOut,
+        // Compte
+        openAccountModal,
+        closeAccountModal,
+        doUpdateName,
+        doUpdatePass,
+        // Partage
+        openShareModal,
+        closeShareModal,
+        doGenCode,
+        doRedeemCode,
+        revokeShare,
+        // Potions
+        openPotionForm,
+        editPotion,
+        savePotion,
+        deletePotion,
+        viewPotion,
+        setDiff,
+        addIngPicker,
+        addToolPicker,
+        addStep,
+        removeStep,
+        renumberSteps,
+        // Ingrédients
+        openIngForm,
+        editIng,
+        saveIng,
+        deleteIng,
+        // Ustensiles
+        openToolForm,
+        editTool,
+        saveTool,
+        deleteTool,
+        addUnit,
+        removeUnit,
+        // Catégories
+        openCatForm,
+        editCat,
+        saveCat,
+        deleteCat,
+        pickEmoji,
+        // Images
+        previewImg,
+        // Persistance
+        fbPersist,
+      });
 
       // ── onAuthStateChanged — point d'entrée ───────────────────────────────
       onAuthStateChanged(auth, async (user) => {
@@ -3620,66 +3686,6 @@
 
       // Note : le seed des potions est géré par seedData() appelée lors du premier chargement Firebase.
       // Le démarrage de l'application est géré par onAuthStateChanged ci-dessus.
-
-      // ── Exposition globale (type="module" requiert window.*) ──────────────────────
-      Object.assign(window, {
-        // Navigation & UI
-        openModal,
-        closeModal,
-        toast,
-        // Auth
-        authTab,
-        doLogin,
-        doSignup,
-        doForgot,
-        doSignOut,
-        // Compte
-        openAccountModal,
-        closeAccountModal,
-        doUpdateName,
-        doUpdatePass,
-        // Partage
-        openShareModal,
-        closeShareModal,
-        doGenCode,
-        doRedeemCode,
-        revokeShare,
-        // Potions
-        openPotionForm,
-        editPotion,
-        savePotion,
-        deletePotion,
-        viewPotion,
-        setDiff,
-        addIngPicker,
-        removeIngPicker,
-        addToolPicker,
-        removeToolPicker,
-        addStep,
-        removeStep,
-        // Ingrédients
-        openIngForm,
-        editIng,
-        saveIng,
-        deleteIng,
-        // Ustensiles
-        openToolForm,
-        editTool,
-        saveTool,
-        deleteTool,
-        addUnit,
-        removeUnit,
-        // Catégories
-        openCatForm,
-        editCat,
-        saveCat,
-        deleteCat,
-        pickEmoji,
-        // Images
-        previewImg,
-        // Persistance
-        fbPersist,
-      });
     </script>
   </body>
 </html>
